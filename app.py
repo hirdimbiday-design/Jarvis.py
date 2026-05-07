@@ -1,60 +1,83 @@
 import streamlit as st
-import streamlit.components.v1 as components
+import MetaTrader5 as mt5
 
-# Page configuration
-st.set_page_config(page_title="Jarvis Dashboard", layout="wide")
-st.title("🤖 Jarvis Trading Dashboard")
+# ==========================================
+# 1. APKI LIVE LOGIN DETAILS
+# ==========================================
+ACCOUNT_ID = 260820558
+PASSWORD = "Yall@1234567"
+SERVER = "Exness-MT5Trial15"
 
-# Sidebar for Navigation and Settings
-st.sidebar.header("Control Panel")
-page = st.sidebar.radio("Go to", ["Live Status", "Trading Performance"])
-pair = st.sidebar.selectbox("Select Asset", ["XAUUSD", "BTCUSD", "ETHUSD"])
+# ==========================================
+# 2. TARGET SETTINGS ($10k Profit Target)
+# ==========================================
+START_BAL = 100000.0
+PROFIT_GOAL = 10000.0
+FINAL_TARGET = START_BAL + PROFIT_GOAL # $110,000
 
-if page == "Live Status":
-    st.subheader(f"📊 Market Monitoring: {pair}")
-    
-    # Live Metrics Row
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Status", "Connected", "Live")
-    col2.metric("Active Pair", pair)
-    col3.metric("Strategy", "Price Action / SMC")
+# ==========================================
+# 3. AUTO-CLOSE FUNCTION (Full Trading Access)
+# ==========================================
+def close_all_positions():
+    """Target hit hone par sari trades foran band karne ke liye"""
+    positions = mt5.positions_get()
+    if positions:
+        for p in positions:
+            tick = mt5.symbol_info_tick(p.symbol)
+            # Opposite order logic to close
+            order_type = mt5.ORDER_TYPE_SELL if p.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+            price = tick.bid if p.type == mt5.POSITION_TYPE_BUY else tick.ask
+            
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "position": p.ticket,
+                "symbol": p.symbol,
+                "volume": p.volume,
+                "type": order_type,
+                "price": price,
+                "magic": 123456,
+                "comment": "Jarvis Target Reached",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+            result = mt5.order_send(request)
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                st.write(f"✅ Closed: {p.symbol} (Ticket: {p.ticket})")
 
-    st.info(f"🔍 Jarvis is searching for Price Action patterns on {pair}...")
+# ==========================================
+# 4. STREAMLIT DASHBOARD & MONITORING
+# ==========================================
+st.set_page_config(page_title="Jarvis Pro Terminal", layout="centered")
+st.title("🤖 Jarvis AI Trading Bot")
 
-    # TradingView Chart Section
-    st.write("---")
-    st.subheader(f"📈 Live {pair} Chart")
-    
-    # TradingView Widget Logic
-    symbol = f"OANDA:{pair}" if pair == "XAUUSD" else f"BINANCE:{pair}P"
-    
-    tradingview_html = f"""
-    <div class="tradingview-widget-container" style="height: 500px;">
-        <div id="tradingview_chart"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-        new TradingView.widget({{
-            "autosize": true,
-            "symbol": "{symbol}",
-            "interval": "15",
-            "timezone": "Etc/UTC",
-            "theme": "dark",
-            "style": "1",
-            "locale": "en",
-            "toolbar_bg": "#f1f3f6",
-            "enable_publishing": false,
-            "hide_side_toolbar": false,
-            "allow_symbol_change": true,
-            "container_id": "tradingview_chart"
-        }});
-        </script>
-    </div>
-    """
-    components.html(tradingview_html, height=550)
-
+# Connection initialize karein
+if not mt5.initialize(login=ACCOUNT_ID, password=PASSWORD, server=SERVER):
+    st.error(f"❌ MT5 Connection Failed! Error: {mt5.last_error()}")
 else:
-    st.subheader("📈 Trading Performance")
-    st.write("Logs and analytics will appear here once the bot starts trading.")
-    st.info("Performance tracking is currently in standby mode.")
+    acc_info = mt5.account_info()
+    if acc_info:
+        current_balance = acc_info.balance
+        profit_loss = current_balance - START_BAL
+        
+        # UI Metrics
+        col1, col2 = st.columns(2)
+        col1.metric("Current Balance", f"${current_balance:,.2f}")
+        col2.metric("Total Profit/Loss", f"${profit_loss:,.2f}", delta=f"${profit_loss}")
 
-  
+        # Progress bar toward $110,000
+        progress = min(max(profit_loss / PROFIT_GOAL, 0.0), 1.0)
+        st.progress(progress)
+        st.write(f"🎯 Target Progress: {progress*100:.1f}%")
+
+        # --- AUTO-STOP LOGIC ---
+        if current_balance >= FINAL_TARGET:
+            st.balloons()
+            st.success(f"🏆 TARGET REACHED! Account Balance: ${current_balance}")
+            st.warning("🔄 Closing all positions and stopping Jarvis...")
+            close_all_positions()
+            mt5.shutdown()
+            st.stop()
+        else:
+            st.info("🛰️ Jarvis is scanning the market. Auto-stop active at $110,000.")
+
+# Yahan se niche aap apni SMC / Jarvis strategy ka logic paste kar sakte hain
